@@ -24,7 +24,7 @@ class myThread(threading.Thread):
 
     def run(self):
         print("Thread started")
-        publishData(self.run_event)
+        publish_data(self.run_event)
         print("Thread stopped")
 
 
@@ -53,6 +53,7 @@ class MindstormBluemix():
     # Callback for when the client receives a CONNACK response from the server.
     def on_connect(self, client, userdata, flags, rc):
         print("Connected with result code " + str(rc))
+        ev3.Sound.speak("I robot connected to Bluemix. Welcome to IBM Innovation center Ljubljana").wait()
 
     def on_subscribe(self, client, userdata, mid, granted_qos):
         print("On subscribe: " + str(mid) + " " + str(granted_qos))
@@ -74,22 +75,72 @@ def handle_message(msg):
     if 'voice' in payload:
         ev3.Sound.speak(payload['voice']).wait()
     if 'robotControl' in payload:
-        print("Spinning motor")
-        m = ev3.MediumMotor('outA')
-        m.run_timed(time_sp=3000, speed_sp=500)
+        arm_control(payload)
+    if 'moveRobot' in payload:
+        move_robot(payload)
 
 
+def move_robot(payload):
+    if 'direction' and 'speed' and 'time' in payload['moveRobot']:
+        speed = int(payload['moveRobot']['speed'])
+        duration = int(payload['moveRobot']['time'])
+        direction = payload['moveRobot']['direction']
 
-def publishData(run_event):
+        left = ev3.LargeMotor('outB')
+        right = ev3.LargeMotor('outC')
+        speed_l, speed_r = 0, 0
+
+        if direction == 'fwd':
+            speed_l = speed
+            speed_r = speed
+        elif direction == 'left':
+            speed_l = -speed
+            speed_r = speed
+        elif direction == 'right':
+            speed_l = speed
+            speed_r = -speed
+        elif direction == 'back':
+            speed_l = -speed
+            speed_r = -speed
+        else:
+            ev3.Sound.speak('Please tell me direction').wait()
+
+        if left.connected and right.connected:
+            left.run_timed(time_sp=duration, speed_sp=speed_l)
+            right.run_timed(time_sp=duration, speed_sp=speed_r)
+
+            # When motor is stopped, its `state` attribute returns empty list.
+            # Wait until both motors are stopped:
+            while any(left.state) or any(right.state):
+                time.sleep(0.1)
+
+
+def arm_control(payload):
+    m = ev3.MediumMotor('outA')
+    speed = int(payload['robotControl']['speed'])
+    duration = int(payload['robotControl']['time'])
+    if m.connected:
+        m.run_timed(time_sp=duration, speed_sp=speed)
+        while any(m.state):
+            time.sleep(0.1)
+        print("done")
+    else:
+        print("Motor not connected")
+
+
+def publish_data(run_event):
     while run_event.is_set():
-        try:
-            data = 123
-            payload = ("{\"d\": \"%d\"}" % data)
-            client.publish(mindBlue.publisher_topic, payload)
-            # print("Data sent")
-            time.sleep(10)
-        except:
-            print("Err")
+        ts = ev3.TouchSensor()
+        if ts.connected and ts.value() == 1:
+            try:
+                ev3.Leds.set_color(ev3.Leds.LEFT, (ev3.Leds.GREEN, ev3.Leds.RED)[ts.value()])
+                payload = ("{\"touchSensorValue\": \"%d\"}" % ts.value())
+                client.publish(mindBlue.publisher_topic, payload)
+                print("Data sent")
+            except:
+                print("Err")
+        else:
+            ev3.Leds.set_color(ev3.Leds.LEFT, (ev3.Leds.GREEN, ev3.Leds.RED)[ts.value()])
 
 
 mindBlue = MindstormBluemix()
